@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { verifyAccessJWT } from './jwt';
+import { AccessJWTVerificationError, verifyAccessJWT } from './jwt';
 
 // Mock the jose module
 vi.mock('jose', () => ({
@@ -104,6 +104,31 @@ describe('verifyAccessJWT', () => {
     await expect(
       verifyAccessJWT('token.with.wrong-aud', 'myteam.cloudflareaccess.com', 'wrong-aud'),
     ).rejects.toThrow('"aud" claim check failed');
+  });
+
+  it('classifies invalid audience errors for structured logging', async () => {
+    const { jwtVerify } = await import('jose');
+
+    vi.mocked(jwtVerify).mockRejectedValue(new Error('"aud" claim check failed'));
+
+    await expect(
+      verifyAccessJWT('token.with.wrong-aud', 'myteam.cloudflareaccess.com', 'wrong-aud'),
+    ).rejects.toMatchObject({
+      name: 'AccessJWTVerificationError',
+      code: 'ACCESS_JWT_AUDIENCE_MISMATCH',
+      issuer: 'https://myteam.cloudflareaccess.com',
+      expectedAudience: 'wrong-aud',
+    });
+  });
+
+  it('wraps jose failures in AccessJWTVerificationError', async () => {
+    const { jwtVerify } = await import('jose');
+
+    vi.mocked(jwtVerify).mockRejectedValue(new Error('Invalid signature'));
+
+    await expect(
+      verifyAccessJWT('invalid.jwt.token', 'myteam.cloudflareaccess.com', 'test-aud'),
+    ).rejects.toBeInstanceOf(AccessJWTVerificationError);
   });
 
   it('throws error for invalid issuer', async () => {

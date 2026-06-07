@@ -389,6 +389,8 @@ npx wrangler secret put CF_AI_GATEWAY_MODEL
 # Enter: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 ```
 
+When `workers-ai/...` is selected, the container config uses Cloudflare's OpenAI-compatible Workers AI endpoint and adds every Workers AI text-generation model to OpenClaw's model dropdown. Non-chat task models such as embeddings, image generation, speech, translation, and classification models are intentionally excluded from the chat dropdown.
+
 This works with any [AI Gateway provider](https://developers.cloudflare.com/ai-gateway/usage/providers/):
 
 | Provider | Example `CF_AI_GATEWAY_MODEL` value | API key is... |
@@ -454,6 +456,8 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 ## Troubleshooting
 
 **`npm run dev` fails with an `Unauthorized` error:** You need to enable Cloudflare Containers in the [Containers dashboard](https://dash.cloudflare.com/?to=/:account/workers/containers)
+
+**Locked out by an invalid gateway token:** Run `npm run reset-gateway`. This generates a new `MOLTBOT_GATEWAY_TOKEN`, stores it with Wrangler, walks you through deleting the `moltbot-sandbox-sandbox` container in the Cloudflare dashboard, redeploys the Worker, and prints the fresh `?token=` URL.
 
 **Gateway fails to start:** Check `npx wrangler secret list` and `npx wrangler tail`
 

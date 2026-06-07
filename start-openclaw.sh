@@ -19,12 +19,24 @@ fi
 
 CONFIG_DIR="/root/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
+CORE_WORKSPACE_DIR="$CONFIG_DIR/workspace"
+MEMORY_FILE="$CORE_WORKSPACE_DIR/MEMORY.md"
 WORKSPACE_DIR="/root/clawd"
 SKILLS_DIR="/root/clawd/skills"
 
 echo "Config directory: $CONFIG_DIR"
 
 mkdir -p "$CONFIG_DIR"
+mkdir -p "$CORE_WORKSPACE_DIR"
+
+if [ ! -f "$MEMORY_FILE" ]; then
+    cat > "$MEMORY_FILE" << 'EOFMEMORY'
+# Memory
+
+Persistent notes for this OpenClaw workspace.
+EOFMEMORY
+    echo "Created missing memory file: $MEMORY_FILE"
+fi
 
 # ============================================================
 # ONBOARD (only if no config exists yet)
@@ -121,8 +133,65 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
 //   workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 //   openai/gpt-4o
 //   anthropic/claude-sonnet-4-5
-if (process.env.CF_AI_GATEWAY_MODEL) {
-    const raw = process.env.CF_AI_GATEWAY_MODEL;
+const WORKERS_AI_COMPAT_CHAT_MODELS = [
+    '@cf/moonshotai/kimi-k2.6',
+    '@cf/zai-org/glm-4.7-flash',
+    '@cf/openai/gpt-oss-120b',
+    '@cf/meta/llama-4-scout-17b-16e-instruct',
+    '@cf/google/gemma-4-26b-a4b-it',
+    '@cf/nvidia/nemotron-3-120b-a12b',
+    '@cf/moonshotai/kimi-k2.5',
+    '@cf/ibm/granite-4.0-h-micro',
+    '@cf/aisingapore/gemma-sea-lion-v4-27b-it',
+    '@cf/openai/gpt-oss-20b',
+    '@cf/qwen/qwen3-30b-a3b-fp8',
+    '@cf/google/gemma-3-12b-it',
+    '@cf/mistralai/mistral-small-3.1-24b-instruct',
+    '@cf/qwen/qwq-32b',
+    '@cf/qwen/qwen2.5-coder-32b-instruct',
+    '@cf/meta/llama-guard-3-8b',
+    '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+    '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    '@cf/meta/llama-3.2-1b-instruct',
+    '@cf/meta/llama-3.2-3b-instruct',
+    '@cf/meta/llama-3.2-11b-vision-instruct',
+    '@cf/meta/llama-3.1-8b-instruct-awq',
+    '@cf/meta/llama-3.1-8b-instruct-fp8',
+    '@cf/meta/llama-3.1-8b-instruct',
+    '@cf/meta/llama-3-8b-instruct',
+    '@cf/meta/llama-3-8b-instruct-awq',
+    '@cf/mistral/mistral-7b-instruct-v0.2',
+    '@cf/google/gemma-7b-it-lora',
+    '@cf/google/gemma-2b-it-lora',
+    '@cf/meta/llama-2-7b-chat-hf-lora',
+    '@cf/google/gemma-7b-it',
+    '@hf/nousresearch/hermes-2-pro-mistral-7b',
+    '@cf/mistral/mistral-7b-instruct-v0.2-lora',
+    '@cf/microsoft/phi-2',
+    '@cf/defog/sqlcoder-7b-2',
+    '@cf/meta/llama-2-7b-chat-fp16',
+    '@cf/mistral/mistral-7b-instruct-v0.1',
+    '@cf/meta/llama-2-7b-chat-int8',
+    '@cf/meta/llama-3.1-70b-instruct',
+    '@cf/meta/llama-3.1-8b-instruct-fast',
+];
+
+function toOpenClawModel(modelId) {
+    return {
+        id: modelId,
+        name: modelId,
+        contextWindow: 131072,
+        maxTokens: 8192,
+    };
+}
+
+const rawModelOverride = process.env.CF_AI_GATEWAY_MODEL || '';
+const shouldConfigureWorkersAi =
+    rawModelOverride.startsWith('workers-ai/') ||
+    (!rawModelOverride && process.env.CLOUDFLARE_AI_GATEWAY_API_KEY && process.env.CF_AI_GATEWAY_ACCOUNT_ID && process.env.CF_AI_GATEWAY_GATEWAY_ID);
+
+if (process.env.CF_AI_GATEWAY_MODEL || shouldConfigureWorkersAi) {
+    const raw = rawModelOverride || 'workers-ai/@cf/moonshotai/kimi-k2.6';
     const slashIdx = raw.indexOf('/');
     const gwProvider = raw.substring(0, slashIdx);
     const modelId = raw.substring(slashIdx + 1);
@@ -132,16 +201,27 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
 
     let baseUrl;
-    if (accountId && gatewayId) {
+    if (gwProvider === 'workers-ai') {
+        if (accountId && gatewayId) {
+            baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/compat';
+        } else if (accountId) {
+            baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + accountId + '/ai/v1';
+        }
+    } else if (accountId && gatewayId) {
         baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
-        if (gwProvider === 'workers-ai') baseUrl += '/v1';
-    } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
-        baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
     }
 
     if (baseUrl && apiKey) {
         const api = gwProvider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
         const providerName = 'cf-ai-gw-' + gwProvider;
+        const models =
+            gwProvider === 'workers-ai'
+                ? WORKERS_AI_COMPAT_CHAT_MODELS.map(toOpenClawModel)
+                : [toOpenClawModel(modelId)];
+        const defaultModelId =
+            gwProvider === 'workers-ai' && !WORKERS_AI_COMPAT_CHAT_MODELS.includes(modelId)
+                ? WORKERS_AI_COMPAT_CHAT_MODELS[0]
+                : modelId;
 
         config.models = config.models || {};
         config.models.providers = config.models.providers || {};
@@ -149,12 +229,15 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
             baseUrl: baseUrl,
             apiKey: apiKey,
             api: api,
-            models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
+            models,
         };
         config.agents = config.agents || {};
         config.agents.defaults = config.agents.defaults || {};
-        config.agents.defaults.model = { primary: providerName + '/' + modelId };
-        console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
+        config.agents.defaults.model = { primary: providerName + '/' + defaultModelId };
+        console.log('AI Gateway model override: provider=' + providerName + ' model=' + defaultModelId + ' via ' + baseUrl);
+        if (gwProvider === 'workers-ai') {
+            console.log('Workers AI compat models available: ' + models.length);
+        }
     } else {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
     }

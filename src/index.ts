@@ -38,7 +38,7 @@ import configErrorHtml from './assets/config-error.html';
  * Transform error messages from the gateway to be more user-friendly.
  */
 function transformErrorMessage(message: string, host: string): string {
-  if (message.includes('gateway token missing') || message.includes('gateway token mismatch')) {
+  if (isGatewayTokenAuthMessage(message)) {
     return `Invalid or missing token. Visit https://${host}?token={REPLACE_WITH_YOUR_TOKEN}`;
   }
 
@@ -47,6 +47,45 @@ function transformErrorMessage(message: string, host: string): string {
   }
 
   return message;
+}
+
+function isGatewayTokenAuthMessage(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  return (
+    lowerMessage.includes('gateway token missing') ||
+    lowerMessage.includes('gateway token mismatch') ||
+    lowerMessage.includes('invalid or missing token')
+  );
+}
+
+function redactTokenLikeText(message: string): string {
+  return message.replace(/[A-Za-z0-9_-]{24,}/g, '[REDACTED]');
+}
+
+function logGatewayAuthFailure(options: {
+  url: URL;
+  env: OpenClawEnv;
+  status: number | null;
+  reason: string;
+  source: 'http' | 'websocket-message' | 'websocket-close';
+  message?: string;
+}): void {
+  console.error(
+    '[GATEWAY_AUTH_FAILURE]',
+    JSON.stringify({
+      event: 'gateway_token_auth_failure',
+      severity: 'ERROR',
+      status: options.status,
+      reason: options.reason,
+      source: options.source,
+      method: options.source === 'http' ? 'HTTP' : 'WEBSOCKET',
+      path: options.url.pathname,
+      query: redactSensitiveParams(options.url),
+      hasQueryToken: options.url.searchParams.has('token'),
+      gatewayTokenConfigured: !!options.env.MOLTBOT_GATEWAY_TOKEN,
+      message: options.message ? redactTokenLikeText(options.message) : null,
+    }),
+  );
 }
 
 /**
@@ -414,6 +453,16 @@ app.all('*', async (c) => {
             if (debugLogs) {
               console.log('[WS] Original error.message:', parsed.error.message);
             }
+            if (isGatewayTokenAuthMessage(parsed.error.message)) {
+              logGatewayAuthFailure({
+                url,
+                env: c.env,
+                status: null,
+                reason: 'gateway_token_message',
+                source: 'websocket-message',
+                message: parsed.error.message,
+              });
+            }
             parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
             if (debugLogs) {
               console.log('[WS] Transformed error.message:', parsed.error.message);
@@ -446,6 +495,16 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Container closed:', event.code, event.reason);
       }
+      if (isGatewayTokenAuthMessage(event.reason)) {
+        logGatewayAuthFailure({
+          url,
+          env: c.env,
+          status: event.code,
+          reason: 'gateway_token_close',
+          source: 'websocket-close',
+          message: event.reason,
+        });
+      }
       // Transform the close reason (truncate to 123 bytes max for WebSocket spec)
       let reason = transformErrorMessage(event.reason, url.host);
       if (reason.length > 123) {
@@ -477,7 +536,7 @@ app.all('*', async (c) => {
     });
   }
 
-  console.log('[HTTP] Proxying:', url.pathname + url.search);
+  console.log('[HTTP] Proxying:', url.pathname + redactSensitiveParams(url));
 
   let httpResponse: Response;
   try {
@@ -512,6 +571,31 @@ app.all('*', async (c) => {
     }
   }
   console.log('[HTTP] Response status:', httpResponse.status);
+  if (httpResponse.status === 401) {
+    logGatewayAuthFailure({
+      url,
+      env: c.env,
+      status: httpResponse.status,
+      reason: 'gateway_http_unauthorized',
+      source: 'http',
+    });
+  }
+  if (!acceptsHtml && httpResponse.status >= 400) {
+    const responseText = await httpResponse
+      .clone()
+      .text()
+      .catch(() => '');
+    if (isGatewayTokenAuthMessage(responseText)) {
+      logGatewayAuthFailure({
+        url,
+        env: c.env,
+        status: httpResponse.status,
+        reason: 'gateway_token_http_response',
+        source: 'http',
+        message: responseText,
+      });
+    }
+  }
 
   // For HTML requests, verify we got actual content from the gateway.
   // containerFetch can return a 200 with empty/streaming body if the gateway's
@@ -519,6 +603,15 @@ app.all('*', async (c) => {
   // of a blank page that the user would be stuck on forever.
   if (acceptsHtml) {
     const body = await httpResponse.text();
+    if (isGatewayTokenAuthMessage(body)) {
+      logGatewayAuthFailure({
+        url,
+        env: c.env,
+        status: httpResponse.status,
+        reason: 'gateway_token_html_response',
+        source: 'http',
+      });
+    }
     if (!body || body.length < 50) {
       console.log(
         `[HTTP] Empty/short response (${body.length} bytes) for HTML request, serving loading page`,

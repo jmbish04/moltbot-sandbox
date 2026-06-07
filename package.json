@@ -8,6 +8,7 @@
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
     "dev": "vite dev",
+    "reset-gateway": "./scripts/reset-gateway.sh",
     "start": "wrangler dev",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
