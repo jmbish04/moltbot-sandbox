@@ -33,6 +33,7 @@ fi
 
 echo "Redeploying Worker with the new gateway token..."
 DEPLOY_LOG="$(mktemp)"
+trap 'rm -f "$DEPLOY_LOG"' EXIT
 if ! npm run deploy 2>&1 | tee "$DEPLOY_LOG"; then
   echo "Deploy failed. The new gateway token is still:"
   echo "$TOKEN"
