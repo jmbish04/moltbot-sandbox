@@ -9,8 +9,9 @@
   },
   "vars": {
     "BACKUP_BUCKET_NAME": "moltbot-backup",
-    "CF_ACCESS_AUD": "dcab86774e272678ab575d01e00b49d3e66f9aa7fcf74273818afe19c72ca5e8",
-    "CF_ACCESS_TEAM_DOMAIN": "colbyhassio.cloudflareaccess.com",
+  },
+  "secrets": {
+    "required": ["CF_ACCESS_AUD", "CF_ACCESS_TEAM_DOMAIN"],
   },
   // Static assets for admin UI (built by vite)
   "assets": {
