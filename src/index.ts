@@ -59,7 +59,7 @@ function isGatewayTokenAuthMessage(message: string): boolean {
 }
 
 function redactTokenLikeText(message: string): string {
-  return message.replace(/[A-Za-z0-9_-]{24,}/g, '[REDACTED]');
+  return message.replace(/\b[a-fA-F0-9]{64}\b/g, '[REDACTED]');
 }
 
 function logGatewayAuthFailure(options: {
