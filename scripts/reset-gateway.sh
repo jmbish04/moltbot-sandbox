@@ -39,14 +39,20 @@ if ! npm run deploy 2>&1 | tee "$DEPLOY_LOG"; then
   exit 1
 fi
 
-WORKER_URL="${WORKER_URL:-$DEFAULT_WORKER_URL}"
+WORKER_URL="${WORKER_URL:-}"
 if [[ -z "$WORKER_URL" ]]; then
   WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$DEPLOY_LOG" | tail -n 1 || true)"
 fi
 
 if [[ -z "$WORKER_URL" ]]; then
-  WORKER_NAME="$(node -e "const fs=require('fs'); const text=fs.readFileSync('wrangler.jsonc','utf8'); const match=text.match(/\"name\"\\s*:\\s*\"([^\"]+)\"/); process.stdout.write(match ? match[1] : 'moltbot-sandbox');")"
-  WORKER_URL="https://${WORKER_NAME}.workers.dev"
+  WORKER_NAME="$(node -e "const fs=require('fs'); const text=fs.readFileSync('wrangler.jsonc','utf8'); const match=text.match(/\"name\"\\s*:\\s*\"([^\"]+)\"/); process.stdout.write(match ? match[1] : '');")"
+  if [[ -n "$WORKER_NAME" ]]; then
+    WORKER_URL="https://${WORKER_NAME}.workers.dev"
+  fi
+fi
+
+if [[ -z "$WORKER_URL" ]]; then
+  WORKER_URL="$DEFAULT_WORKER_URL"
 fi
 
 rm -f "$DEPLOY_LOG"
