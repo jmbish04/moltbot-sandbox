@@ -159,6 +159,8 @@ describe('createAccessMiddleware', () => {
 
     const c = {
       req: {
+        method: 'GET',
+        url: 'https://worker.example.test/_admin/?token=secret-token',
         header: (name: string) => headers.get(name),
         raw: { headers },
       },
@@ -229,6 +231,7 @@ describe('createAccessMiddleware', () => {
     const { c, jsonMock } = createFullMockContext({
       env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
     });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const middleware = createAccessMiddleware({ type: 'json' });
     const next = vi.fn();
 
@@ -236,12 +239,22 @@ describe('createAccessMiddleware', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(jsonMock).toHaveBeenCalledWith(expect.objectContaining({ error: 'Unauthorized' }), 401);
+    expect(consoleError).toHaveBeenCalledWith(
+      '[AUTH_FAILURE]',
+      expect.stringContaining('"reason":"missing_cloudflare_access_jwt"'),
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      '[AUTH_FAILURE]',
+      expect.stringContaining('"query":"?token=%5BREDACTED%5D"'),
+    );
+    consoleError.mockRestore();
   });
 
   it('returns 401 HTML error when JWT is missing', async () => {
     const { c, htmlMock } = createFullMockContext({
       env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
     });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const middleware = createAccessMiddleware({ type: 'html' });
     const next = vi.fn();
 
@@ -249,12 +262,14 @@ describe('createAccessMiddleware', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(htmlMock).toHaveBeenCalledWith(expect.stringContaining('Unauthorized'), 401);
+    consoleError.mockRestore();
   });
 
   it('redirects when JWT is missing and redirectOnMissing is true', async () => {
     const { c, redirectMock } = createFullMockContext({
       env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
     });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const middleware = createAccessMiddleware({ type: 'html', redirectOnMissing: true });
     const next = vi.fn();
 
@@ -262,5 +277,46 @@ describe('createAccessMiddleware', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(redirectMock).toHaveBeenCalledWith('https://team.cloudflareaccess.com', 302);
+    consoleError.mockRestore();
+  });
+
+  it('logs structured auth failure when JWT verification fails', async () => {
+    vi.resetModules();
+
+    class MockAccessJWTVerificationError extends Error {
+      code = 'ACCESS_JWT_AUDIENCE_MISMATCH';
+    }
+
+    vi.doMock('./jwt', () => ({
+      AccessJWTVerificationError: MockAccessJWTVerificationError,
+      verifyAccessJWT: vi
+        .fn()
+        .mockRejectedValue(new MockAccessJWTVerificationError('JWT audience mismatch')),
+    }));
+
+    const { createAccessMiddleware } = await import('./middleware');
+    const { c, jsonMock } = createFullMockContext({
+      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
+      jwtHeader: 'header.jwt.token',
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(jsonMock).toHaveBeenCalledWith(expect.objectContaining({ error: 'Unauthorized' }), 401);
+    expect(consoleError).toHaveBeenCalledWith(
+      '[AUTH_FAILURE]',
+      expect.stringContaining('"reason":"ACCESS_JWT_AUDIENCE_MISMATCH"'),
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      '[AUTH_FAILURE]',
+      expect.stringContaining('"jwtSource":"header"'),
+    );
+
+    consoleError.mockRestore();
+    vi.doUnmock('./jwt');
   });
 });

@@ -7,6 +7,12 @@
   "observability": {
     "enabled": true,
   },
+  "vars": {
+    "BACKUP_BUCKET_NAME": "moltbot-backup",
+  },
+  "secrets": {
+    "required": ["CF_ACCESS_AUD", "CF_ACCESS_TEAM_DOMAIN"],
+  },
   // Static assets for admin UI (built by vite)
   "assets": {
     "directory": "./dist/client",
@@ -60,7 +66,9 @@
   "r2_buckets": [
     {
       "binding": "BACKUP_BUCKET",
-      "bucket_name": "moltbot-data","preview_bucket_name": "moltbot-data",
+      "bucket_name": "moltbot-backup",
+      "preview_bucket_name": "moltbot-backup",
+      "remote": true,
     },
   ],
 

@@ -1,6 +1,7 @@
 import type { Context, Next } from 'hono';
 import type { AppEnv, OpenClawEnv } from '../types';
-import { verifyAccessJWT } from './jwt';
+import { redactSensitiveParams } from '../utils/logging';
+import { AccessJWTVerificationError, verifyAccessJWT } from './jwt';
 
 /**
  * Options for creating an access middleware
@@ -38,6 +39,80 @@ export function extractJWT(c: Context<AppEnv>): string | null {
     ?.split('=')[1];
 
   return jwtHeader || jwtCookie || null;
+}
+
+type JWTSource = 'header' | 'cookie' | 'none';
+
+function getJWTSource(c: Context<AppEnv>): JWTSource {
+  if (c.req.header('CF-Access-JWT-Assertion')) return 'header';
+
+  const hasAccessCookie = c.req.raw.headers
+    .get('Cookie')
+    ?.split(';')
+    .some((cookie) => cookie.trim().startsWith('CF_Authorization='));
+
+  return hasAccessCookie ? 'cookie' : 'none';
+}
+
+function getSafeRequestContext(c: Context<AppEnv>): {
+  method: string;
+  path: string;
+  query: string;
+  cfRay: string | null;
+} {
+  const method = c.req.method ?? 'UNKNOWN';
+  const cfRay = c.req.header('CF-Ray') ?? null;
+  const rawUrl = c.req.url;
+
+  if (!rawUrl) {
+    return { method, path: 'unknown', query: '', cfRay };
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    return {
+      method,
+      path: url.pathname,
+      query: redactSensitiveParams(url),
+      cfRay,
+    };
+  } catch {
+    return { method, path: 'unknown', query: '', cfRay };
+  }
+}
+
+function logAccessAuthFailure(
+  c: Context<AppEnv>,
+  options: {
+    status: 401 | 302;
+    reason: string;
+    responseType: AccessMiddlewareOptions['type'];
+    error?: unknown;
+  },
+): void {
+  const request = getSafeRequestContext(c);
+  const jwtSource = getJWTSource(c);
+  const error = options.error;
+  const event = {
+    event: 'cloudflare_access_auth_failure',
+    severity: 'ERROR',
+    status: options.status,
+    reason: options.reason,
+    responseType: options.responseType,
+    method: request.method,
+    path: request.path,
+    query: request.query,
+    cfRay: request.cfRay,
+    jwtSource,
+    hasJwt: jwtSource !== 'none',
+    teamDomainConfigured: !!c.env.CF_ACCESS_TEAM_DOMAIN,
+    audConfigured: !!c.env.CF_ACCESS_AUD,
+    errorName: error instanceof Error ? error.name : null,
+    errorCode: error instanceof AccessJWTVerificationError ? error.code : null,
+    errorMessage: error instanceof Error ? error.message : null,
+  };
+
+  console.error('[AUTH_FAILURE]', JSON.stringify(event));
 }
 
 /**
@@ -88,6 +163,12 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
     const jwt = extractJWT(c);
 
     if (!jwt) {
+      logAccessAuthFailure(c, {
+        status: type === 'html' && redirectOnMissing ? 302 : 401,
+        reason: 'missing_cloudflare_access_jwt',
+        responseType: type,
+      });
+
       if (type === 'html' && redirectOnMissing) {
         return c.redirect(`https://${teamDomain}`, 302);
       }
@@ -122,7 +203,12 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
       c.set('accessUser', { email: payload.email, name: payload.name });
       await next();
     } catch (err) {
-      console.error('Access JWT verification failed:', err);
+      logAccessAuthFailure(c, {
+        status: 401,
+        reason: err instanceof AccessJWTVerificationError ? err.code : 'jwt_verification_failed',
+        responseType: type,
+        error: err,
+      });
 
       if (type === 'json') {
         return c.json(

@@ -8,6 +8,7 @@
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
     "dev": "vite dev",
+    "reset-gateway": "./scripts/reset-gateway.sh",
     "start": "wrangler dev",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
@@ -29,8 +30,8 @@
   },
   "devDependencies": {
     "@cloudflare/sandbox": "^0.7.20",
-    "@cloudflare/vite-plugin": "^1.0.0",
-    "@cloudflare/workers-types": "^4.20250109.0",
+    "@cloudflare/vite-plugin": "^1.40.0",
+    "@cloudflare/workers-types": "^4.20260607.1",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -41,7 +42,7 @@
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vitest": "^4.0.18",
-    "wrangler": "^4.50.0"
+    "wrangler": "^4.98.0"
   },
   "author": "",
   "license": "Apache-2.0",
