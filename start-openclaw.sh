@@ -193,6 +193,10 @@ const shouldConfigureWorkersAi =
 if (process.env.CF_AI_GATEWAY_MODEL || shouldConfigureWorkersAi) {
     const raw = rawModelOverride || 'workers-ai/@cf/moonshotai/kimi-k2.6';
     const slashIdx = raw.indexOf('/');
+    if (slashIdx === -1) {
+        console.error('Invalid CF_AI_GATEWAY_MODEL format. Expected "provider/model-id", got: "' + raw + '"');
+        process.exit(1);
+    }
     const gwProvider = raw.substring(0, slashIdx);
     const modelId = raw.substring(slashIdx + 1);
 
