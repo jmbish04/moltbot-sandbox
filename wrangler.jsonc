@@ -6,6 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
+    "traces": { "enabled": false },
+    "logs": { "enabled": true, "invocation_logs": false }
   },
   "vars": {
     "BACKUP_BUCKET_NAME": "moltbot-backup",
